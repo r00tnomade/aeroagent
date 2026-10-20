@@ -45,7 +45,7 @@ def run(
     from gym_pybullet_drones.utils.enums import DroneModel, Physics
 
     from agent.features import FeatureBuilder
-    from agent.supervisor import SupervisorWorker
+    from agent.supervisor import RulePolicy, SupervisorWorker
     from control.reflex import FNOWindEstimator, drag_force, feedforward_target_vel
     from sim.wind_aviary import GridWind, WindAviary
 
@@ -60,8 +60,17 @@ def run(
         policy_name != "pid"
     )  # "pid": plain PID baseline, no FNO feedforward, no supervisor
     worker = None
-    if policy_name in ("rules", "nemotron"):
-        spec = {"name": policy_name, "model": model, "timeout_s": timeout_s}
+    # "hybrid": Nemotron supervises, and the rule set acts as an instant MINIMUM (guardrail) at 10 Hz:
+    # if the rules say GUST_RIDE, gains are at least 1.3 no matter what the LLM says or how late it is.
+    use_floor = policy_name == "hybrid"
+    rules = RulePolicy() if use_floor else None
+    floor_active, floor_ticks = False, 0
+    if policy_name in ("rules", "nemotron", "hybrid"):
+        spec = {
+            "name": "nemotron" if use_floor else policy_name,
+            "model": model,
+            "timeout_s": timeout_s,
+        }
         worker = SupervisorWorker(
             spec,
             IntentValidator(CLOSED_LOOP_VALIDATOR, waypoint_ok=builder.waypoint_ok),
@@ -128,7 +137,26 @@ def run(
             if worker is not None:
                 worker.poll()
                 intent = worker.current()
-                mode, gain = intent.mode, float(intent.pid_gain_scale)
+                mode, g_cmd = intent.mode, float(intent.pid_gain_scale)
+                if use_floor:
+                    if (
+                        k % (every * 5) == 0
+                    ):  # rule guardrail at ~10 Hz, zero network latency
+                        f_now = builder.build(t, pos, vel, rpy, target, last_intent)
+                        floor_active = json.loads(rules(f_now))["mode"] == "GUST_RIDE"
+                    if floor_active and g_cmd < 1.3:
+                        g_cmd, mode = 1.3, mode + "+floor"
+                        floor_ticks += 1
+                    # same ramp the validator enforces on the LLM: <= 0.2 per 0.5 s
+                    gain += float(
+                        np.clip(
+                            g_cmd - gain,
+                            -0.4 * every * env.CTRL_TIMESTEP,
+                            0.4 * every * env.CTRL_TIMESTEP,
+                        )
+                    )
+                else:
+                    gain = g_cmd
                 desired = hover + np.asarray(intent.waypoint_offset_m, float)
                 step = (
                     0.3 * every * env.CTRL_TIMESTEP
@@ -192,6 +220,7 @@ def run(
     out["decisions"] = worker.log if worker else []
     out["hover"] = hover
     out["realtime_factor"] = duration / loop_wall
+    out["floor_ticks"] = floor_ticks
     return out
 
 
@@ -215,6 +244,7 @@ def summarize(name: str, r: dict, settle: float = 0.5) -> dict:
         "llm_latency_p95_s": float(np.percentile(lat, 95)) if lat else None,
         "modes": sorted(set(str(x) for x in r["mode"])),
         "realtime_factor": float(r["realtime_factor"]),
+        "floor_ticks": int(r.get("floor_ticks", 0)),
     }
     return m
 
@@ -224,12 +254,19 @@ def plot(results: dict, summ: dict, raw, run_name: str) -> None:
 
     from viz.make_figures import AQUA, BLUE, GRAY, INK2, ORANGE, _save
 
-    colors = {"pid": ORANGE, "none": GRAY, "rules": AQUA, "nemotron": BLUE}
+    colors = {
+        "pid": ORANGE,
+        "none": GRAY,
+        "rules": AQUA,
+        "nemotron": BLUE,
+        "hybrid": INK2,
+    }
     labels = {
         "pid": "PID only (no FNO)",
         "none": "FNO feedforward, no supervisor",
         "rules": "+ rule supervisor",
         "nemotron": "+ Nemotron supervisor",
+        "hybrid": "+ Nemotron with rule guardrail",
     }
     fig, axes = plt.subplots(
         3,

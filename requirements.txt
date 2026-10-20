@@ -1,0 +1,9 @@
+# torch, pybullet and ffmpeg come from conda-forge (see README quickstart)
+numpy
+scipy
+matplotlib
+gymnasium
+transforms3d
+openai
+jsonschema
+pytest
