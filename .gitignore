@@ -1,0 +1,35 @@
+# Environment & secrets
+.venv/
+venv/
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+build/
+dist/
+
+# Data, checkpoints, recordings (too large for git; use releases/object storage)
+data/
+checkpoints/
+*.pt
+*.pth
+*.ckpt
+*.npz
+*.h5
+*.hdf5
+runs/
+results/
+*.rrd
+!assets/demo.rrd
+
+# OS / editors
+.DS_Store
+.idea/
+.vscode/
