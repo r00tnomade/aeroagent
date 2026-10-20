@@ -1,4 +1,4 @@
-# Copyright 2026 <Your Name>
+# Copyright 2026 Sami Adam Moughli
 # SPDX-License-Identifier: Apache-2.0
 """Tier 1 reflex: sensors -> FNO flow field -> wind at the drone -> drag-force feedforward (50 Hz).
 

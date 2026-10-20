@@ -296,6 +296,8 @@ def main() -> None:
 
     Path("results").mkdir(exist_ok=True)
     tag = f"{run_path.stem}_x{args.x:.1f}".replace(".", "p")
+    if args.ckpt.parent.name not in ("checkpoints", ""):
+        tag += f"_{args.ckpt.parent.name}"  # e.g. ..._checkpoints_v2, keeps v1 results intact
     out = Path("results") / f"ablation_{tag}.json"
     out.write_text(
         json.dumps(

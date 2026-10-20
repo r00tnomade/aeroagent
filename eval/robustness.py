@@ -111,7 +111,7 @@ def evaluate(
     return rows
 
 
-def plot(rows: list[dict]) -> None:
+def plot(rows: list[dict], suffix: str = "") -> None:
     import matplotlib.pyplot as plt
 
     from viz.make_figures import BLUE, GRAY, INK2, MUTED, _save
@@ -165,7 +165,7 @@ def plot(rows: list[dict]) -> None:
     )
     _save(
         fig,
-        "robustness",
+        f"robustness{suffix}",
         "Hover 1.2 m behind the cylinder, held-out run(s). Gray: control without FNO (constant mean wind). Simulator always applies true wind and drag.",
     )
 
@@ -191,10 +191,15 @@ def main() -> None:
             [("unseen run", "nominal", {}, 1.0)],
         )
         rows += extra
+    suffix = (
+        ""
+        if args.ckpt.parent.name in ("checkpoints", "")
+        else f"_{args.ckpt.parent.name}"
+    )
     Path("results").mkdir(exist_ok=True)
-    Path("results/robustness.json").write_text(json.dumps(rows, indent=2))
-    print("saved results/robustness.json")
-    plot(rows)
+    Path(f"results/robustness{suffix}.json").write_text(json.dumps(rows, indent=2))
+    print(f"saved results/robustness{suffix}.json")
+    plot(rows, suffix)
 
 
 if __name__ == "__main__":
