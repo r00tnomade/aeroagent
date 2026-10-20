@@ -16,8 +16,11 @@ Input fields:
 - track_err_m: distance to the current set-point (grows briefly whenever the set-point is moved).
 - flow.wind_at_drone: estimated wind at the drone [u, 0, w].
 - flow.wind_upstream_mean: mean estimated wind on the 1 m upstream of the drone (what arrives next).
-- flow.gust_level: inflow speed relative to its recent minimum (0 = calm, 0.1+ = gust building, 0.5 = strong).
-- flow.gust_eta_s: estimated seconds until the gust front reaches the drone, null if no gust.
+- flow.gust_level: gust strength UPSTREAM of the obstacle right now (0 = calm, 0.1+ = gust, 0.5 = strong).
+- flow.gust_at_drone: gust strength that is reaching the DRONE right now (the upstream gust arrives
+  gust_transit_s later, typically ~1 s). This is what the drone actually feels.
+- flow.gust_eta_s: seconds until an upstream gust reaches the drone (null if none is on the way).
+- flow.gust_remaining_s: seconds until the gust at the drone has passed (null if no gust at the drone).
 - flow.vorticity_peak: strongest vortex within 0.4 m: magnitude [1/s] and position. In this wake 15-35 is NORMAL;
   the wind feedforward already compensates it. A vortex alone is never a reason to move.
 - flow.turb_intensity: local velocity fluctuation / mean speed.
@@ -27,7 +30,9 @@ Input fields:
 
 Modes:
 - TRACK: nominal. pid_gain_scale 1.0, waypoint_offset_m [0,0,0].
-- GUST_RIDE: a gust is arriving or present (gust_level > 0.1 or gust_eta_s < 1.5). Stiffen: pid_gain_scale 1.2-1.4, max_tilt_deg 15-20.
+- GUST_RIDE: a gust is on the way (gust_eta_s < 1.5) or at the drone (gust_at_drone > 0.08).
+  Stiffen: pid_gain_scale 1.2-1.4, max_tilt_deg 15-20. STAY in GUST_RIDE until gust_at_drone < 0.05 and
+  gust_remaining_s is null, even if the upstream gust_level is already calm again.
 - RETREAT: only if hover_err_m > 0.05 m in calm inflow, i.e. the controller is clearly losing the point.
   Small vertical offset (<= 0.2 m). Moving away from the hover point costs mission performance.
 - HOLD: data unreliable (fno_uncertainty > 0.6 or state stale). Conservative: gain 1.0, tilt 15, no offset.
@@ -43,9 +48,11 @@ Respond ONLY with JSON matching the schema.
 Examples:
 IN {"flow":{"gust_level":0.05,"gust_eta_s":null,"vorticity_peak":{"mag":24.0,"pos":[1.3,0,1.05]},"fno_uncertainty":0.3},"hover_err_m":0.006,"track_err_m":0.006}
 OUT {"mode":"TRACK","target_attitude":{"roll_deg":0,"pitch_deg":0,"yaw_rate_dps":0},"thrust_norm":0.5,"pid_gain_scale":1.0,"waypoint_offset_m":[0,0,0],"max_tilt_deg":25,"confidence":0.9,"rationale_short":"Normal wake vortices, feedforward holds the point within 1 cm."}
-IN {"flow":{"gust_level":0.25,"gust_eta_s":0.7,"fno_uncertainty":0.3},"hover_err_m":0.008,"track_err_m":0.008}
+IN {"flow":{"gust_level":0.25,"gust_at_drone":0.0,"gust_eta_s":0.7,"gust_remaining_s":null,"fno_uncertainty":0.3},"hover_err_m":0.008,"track_err_m":0.008}
 OUT {"mode":"GUST_RIDE","target_attitude":{"roll_deg":0,"pitch_deg":0,"yaw_rate_dps":0},"thrust_norm":0.5,"pid_gain_scale":1.3,"waypoint_offset_m":[0,0,0],"max_tilt_deg":18,"confidence":0.8,"rationale_short":"Gust front arrives in 0.7 s; stiffen gains and cap tilt."}
-IN {"flow":{"gust_level":0.02,"gust_eta_s":null,"fno_uncertainty":0.3},"mission":{"offset_m":[0,0,-0.2]},"hover_err_m":0.19,"track_err_m":0.01}
+IN {"flow":{"gust_level":0.02,"gust_at_drone":0.16,"gust_eta_s":null,"gust_remaining_s":0.6,"fno_uncertainty":0.3},"hover_err_m":0.011,"track_err_m":0.011}
+OUT {"mode":"GUST_RIDE","target_attitude":{"roll_deg":0,"pitch_deg":0,"yaw_rate_dps":0},"thrust_norm":0.5,"pid_gain_scale":1.3,"waypoint_offset_m":[0,0,0],"max_tilt_deg":18,"confidence":0.8,"rationale_short":"Upstream calm, but the gust is still on the drone for 0.6 s; keep gains up."}
+IN {"flow":{"gust_level":0.02,"gust_at_drone":0.0,"gust_eta_s":null,"fno_uncertainty":0.3},"mission":{"offset_m":[0,0,-0.2]},"hover_err_m":0.19,"track_err_m":0.01}
 OUT {"mode":"TRACK","target_attitude":{"roll_deg":0,"pitch_deg":0,"yaw_rate_dps":0},"thrust_norm":0.5,"pid_gain_scale":1.0,"waypoint_offset_m":[0,0,0],"max_tilt_deg":25,"confidence":0.85,"rationale_short":"Calm again and set-point tracked; return the 0.2 m offset to the hover point."}"""
 
 INTENT_SCHEMA = {

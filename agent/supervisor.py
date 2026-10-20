@@ -112,9 +112,16 @@ class RulePolicy:
             intent.update(
                 mode="HOLD", max_tilt_deg=15, rationale_short="flow estimate unreliable"
             )
-        elif fl["gust_level"] > 0.1 or (
-            fl["gust_eta_s"] is not None and fl["gust_eta_s"] < 1.5
+        elif (
+            fl.get("gust_at_drone", 0) > 0.08 or fl.get("gust_remaining_s") is not None
         ):
+            intent.update(
+                mode="GUST_RIDE",
+                pid_gain_scale=1.3,
+                max_tilt_deg=18,
+                rationale_short="gust at drone",
+            )
+        elif fl["gust_eta_s"] is not None and fl["gust_eta_s"] < 1.5:
             intent.update(
                 mode="GUST_RIDE",
                 pid_gain_scale=1.3,

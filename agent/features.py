@@ -1,4 +1,4 @@
-# Copyright 2026 <Your Name>
+# Copyright 2026 Sami Adam Moughli
 # SPDX-License-Identifier: Apache-2.0
 """Compress the FNO flow field into ~30 numbers for Nemotron (it never sees raw grids)."""
 
@@ -24,8 +24,72 @@ class FeatureBuilder:
         self.hover = np.asarray(hover_point, float)
         self.x_obstacle = float(x_obstacle)
         self.geofence = geofence
-        self._inflow = deque(maxlen=max(2, int(history_s / estimator.run.dt)))
+        self._inflow = deque(
+            maxlen=max(2, int(history_s / estimator.run.dt))
+        )  # per build() call (legacy)
+        self._hist: deque[tuple[float, float]] = deque(
+            maxlen=400
+        )  # (t, u_in) at the reflex rate
+        self.x_in = self.x_obstacle - 0.5
+        self.conv = 0.85  # wake structures travel at ~0.85 of the inflow speed (frozen-flow, assumption)
+        self.thr = 0.08  # gust level that counts as "gust present"
         self._sensor_cells = self._fluid_cells_near_sensors()
+
+    # ------------------------------------------------------------------ gust tracking at the reflex rate
+    def _u_in(self, u: np.ndarray) -> float:
+        zs = self.est.zs
+        return float(
+            np.mean(
+                [
+                    self._sample(u, self.x_in, zz)
+                    for zz in np.linspace(zs[0] + 0.2, zs[-1] - 0.2, 7)
+                ]
+            )
+        )
+
+    def observe(self, t: float) -> None:
+        """Call every Tier 1 tick (after the estimator update): records the inflow speed history."""
+        f = self.est.last_field
+        if f is not None:
+            self._hist.append((float(t), self._u_in(f[0])))
+
+    def gust_timing(self, t: float, x_drone: float) -> dict:
+        """Gust level upstream now, at the drone now (delayed by the convection time), arrival and remaining time."""
+        if len(self._hist) < 3:
+            return {
+                "level_inflow": 0.0,
+                "level_at_drone": 0.0,
+                "eta_s": None,
+                "remaining_s": None,
+                "transit_s": None,
+            }
+        ts = np.array([h[0] for h in self._hist])
+        us = np.array([h[1] for h in self._hist])
+        recent = ts >= t - 3.0
+        u_ref = max(float(np.min(us[recent])), 0.3)
+        lv = np.maximum(0.0, us / u_ref - 1.0)
+        transit = max(x_drone - self.x_in, 0.0) / max(self.conv * u_ref, 0.3)
+        level_now = float(lv[-1])
+        t_seen = t - transit  # inflow moment that is reaching the drone right now
+        level_at = float(np.interp(t_seen, ts, lv)) if t_seen >= ts[0] else 0.0
+        eta = remaining = None
+        if level_at < self.thr and level_now >= self.thr:
+            above = np.nonzero((ts >= t_seen) & (lv >= self.thr))[
+                0
+            ]  # first inflow sample above threshold
+            eta = float(ts[above[0]] + transit - t) if above.size else transit
+        if level_at >= self.thr:
+            later = np.nonzero((ts > t_seen) & (lv < self.thr))[
+                0
+            ]  # when did the inflow calm down again?
+            remaining = float(ts[later[0]] + transit - t) if later.size else transit
+        return {
+            "level_inflow": level_now,
+            "level_at_drone": level_at,
+            "eta_s": eta,
+            "remaining_s": remaining,
+            "transit_s": transit,
+        }
 
     def _fluid_cells_near_sensors(self) -> np.ndarray:
         """For each sensor, the nearest NON-solid cell of the (downsampled) model grid."""
@@ -69,23 +133,11 @@ class FeatureBuilder:
             [[self._sample(u, xi, z), self._sample(w, xi, z)] for xi in seg]
         ).mean(0)
 
-        # inflow speed just upstream of the obstacle -> gust level and arrival time (frozen-flow assumption)
-        x_in = self.x_obstacle - 0.5
-        u_in = float(
-            np.mean(
-                [
-                    self._sample(u, x_in, zz)
-                    for zz in np.linspace(zs[0] + 0.2, zs[-1] - 0.2, 7)
-                ]
-            )
-        )
-        self._inflow.append(u_in)
-        u_ref = max(min(self._inflow), 0.3)
-        gust_level = max(0.0, u_in / u_ref - 1.0)
-        rising = len(self._inflow) > 3 and self._inflow[-1] > self._inflow[-4] + 0.02
-        gust_eta = (
-            (x - x_in) / max(u_in, 0.5) if (gust_level > 0.08 and rising) else None
-        )
+        # gust: upstream level now, level at the drone now (convection delay), arrival / remaining time
+        if not self._hist:
+            self.observe(t)
+        g = self.gust_timing(t, x)
+        rd = lambda v: None if v is None else round(float(v), 2)  # noqa: E731
 
         # vorticity peak near the drone
         dx = xs[1] - xs[0]
@@ -134,8 +186,11 @@ class FeatureBuilder:
                     0.0,
                     round(float(up[1]), 2),
                 ],
-                "gust_level": round(gust_level, 2),
-                "gust_eta_s": None if gust_eta is None else round(gust_eta, 2),
+                "gust_level": round(g["level_inflow"], 2),
+                "gust_at_drone": round(g["level_at_drone"], 2),
+                "gust_eta_s": rd(g["eta_s"]),
+                "gust_remaining_s": rd(g["remaining_s"]),
+                "gust_transit_s": rd(g["transit_s"]),
                 "vorticity_peak": vpeak,
                 "turb_intensity": round(turb, 2),
                 "fno_uncertainty": round(unc, 2),

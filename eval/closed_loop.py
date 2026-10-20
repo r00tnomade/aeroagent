@@ -56,8 +56,11 @@ def run(
     x_obs = float(raw["x"][int(round(solid[:, 1].mean()))])
     builder = FeatureBuilder(est, hover, x_obs)
 
+    use_ff = (
+        policy_name != "pid"
+    )  # "pid": plain PID baseline, no FNO feedforward, no supervisor
     worker = None
-    if policy_name:
+    if policy_name in ("rules", "nemotron"):
         spec = {"name": policy_name, "model": model, "timeout_s": timeout_s}
         worker = SupervisorWorker(
             spec,
@@ -107,8 +110,13 @@ def run(
             "mode",
             "force",
             "tick_t",
+            "pos",
+            "rpy",
+            "wind",
+            "wind_hat",
         )
     }
+    w_hat = np.zeros(3)
     last_intent = {"mode": "TRACK", "pid_gain_scale": 1.0}
     t_wall0 = time.perf_counter()
     for k in range(steps):
@@ -116,7 +124,7 @@ def run(
         state = obs[0]
         pos, vel, rpy = state[0:3], state[10:13], np.degrees(state[7:10])
         if k % every == 0:  # Tier 1 (+ Tier 2 bookkeeping)
-            mode = "none"
+            mode = "pid" if not use_ff else "none"
             if worker is not None:
                 worker.poll()
                 intent = worker.current()
@@ -131,9 +139,17 @@ def run(
                 if worker.ready():
                     f = builder.build(t, pos, vel, rpy, target, last_intent)
                     worker.maybe_submit(f, t)
-            w_hat = est.estimate(pos, t).wind
-            dv = feedforward_target_vel(
-                drag_force(w_hat, vel, env.cd_a), np.asarray(ctrl.D_COEFF_FOR, float)
+            w_hat = est.estimate(
+                pos, t
+            ).wind  # computed for every policy (logged for the video), used only with FF
+            builder.observe(t)
+            dv = (
+                feedforward_target_vel(
+                    drag_force(w_hat, vel, env.cd_a),
+                    np.asarray(ctrl.D_COEFF_FOR, float),
+                )
+                if use_ff
+                else np.zeros(3)
             )
             log["mode"].append(mode)
             log["gain"].append(gain)
@@ -151,6 +167,12 @@ def run(
         log["err_hover"].append(float(np.linalg.norm(p_new - hover)))
         log["err_target"].append(float(np.linalg.norm(p_new - target)))
         log["target"].append(target.copy())
+        log["pos"].append(p_new.copy())
+        log["rpy"].append(obs[0][7:10].copy())
+        log["wind"].append(
+            info["wind"][0].copy() if info["wind"] is not None else np.zeros(3)
+        )
+        log["wind_hat"].append(w_hat.copy())
         log["force"].append(
             float(np.linalg.norm(info["wind_force"][0]))
             if info["wind_force"] is not None
@@ -202,8 +224,9 @@ def plot(results: dict, summ: dict, raw, run_name: str) -> None:
 
     from viz.make_figures import AQUA, BLUE, GRAY, INK2, ORANGE, _save
 
-    colors = {"none": GRAY, "rules": AQUA, "nemotron": BLUE}
+    colors = {"pid": ORANGE, "none": GRAY, "rules": AQUA, "nemotron": BLUE}
     labels = {
+        "pid": "PID only (no FNO)",
         "none": "FNO feedforward, no supervisor",
         "rules": "+ rule supervisor",
         "nemotron": "+ Nemotron supervisor",
@@ -231,7 +254,12 @@ def plot(results: dict, summ: dict, raw, run_name: str) -> None:
             r["err_hover"] * 100,
             color=colors[n],
             linewidth=2.2 if n == "nemotron" else 1.6,
-            label=f"{labels[n]}: RMS {s['rms_hover_cm']:.2f} cm, max {s['max_hover_cm']:.2f} cm",
+            label=f"{labels[n]}: RMS {s['rms_hover_cm']:.2f} cm, max {s['max_hover_cm']:.2f} cm"
+            + (
+                f"  (mean of {len(s['repeats'])}: {s['rms_hover_cm_mean']:.2f} ± {s['rms_hover_cm_std']:.2f})"
+                if len(s.get("repeats", [])) > 1
+                else ""
+            ),
         )
     axes[1].set_ylabel("distance to hover point [cm]")
     axes[1].set_ylim(bottom=0)
@@ -290,35 +318,85 @@ def main() -> None:
     ap.add_argument(
         "--timeout", type=float, default=6.0, help="Nemotron request timeout [s]"
     )
+    ap.add_argument(
+        "--repeats",
+        type=int,
+        default=1,
+        help="repeats for supervised policies (LLM timing varies)",
+    )
     args = ap.parse_args()
 
     run_path = args.run or default_run()
     raw = np.load(run_path)
     results, summ = {}, {}
     for p in args.policies:
-        print(f"\n[{p}] {run_path.name}, real time, {args.duration:.1f} s")
-        r = run(
-            None if p == "none" else p,
-            run_path,
-            args.ckpt,
-            args.x,
-            args.duration,
-            args.model,
-            args.period,
-            timeout_s=args.timeout,
-        )
-        results[p], summ[p] = r, summarize(p, r)
-        s = summ[p]
-        print(
-            f"  RMS to hover point {s['rms_hover_cm']:.2f} cm (max {s['max_hover_cm']:.2f}) | "
-            f"decisions {s['decisions']} (accepted {s['accepted']}, errors {s['errors']}) | "
-            f"LLM p50 {s['llm_latency_p50_s'] or 0:.2f} s | real-time factor {s['realtime_factor']:.2f}"
-        )
-        if r["decisions"]:
-            Path("results").mkdir(exist_ok=True)
-            with open(f"results/decisions_{p}_{run_path.stem}.jsonl", "w") as fh:
-                for d in r["decisions"]:
-                    fh.write(json.dumps(d) + "\n")
+        reps = (
+            1 if p in ("pid", "none") else args.repeats
+        )  # Tier 0/1 are deterministic; Tier 2 is not
+        runs_p = []
+        for rep in range(reps):
+            print(
+                f"\n[{p}] {run_path.name}, real time, {args.duration:.1f} s"
+                + (f", repeat {rep + 1}/{reps}" if reps > 1 else "")
+            )
+            r = run(
+                None if p == "none" else p,
+                run_path,
+                args.ckpt,
+                args.x,
+                args.duration,
+                args.model,
+                args.period,
+                timeout_s=args.timeout,
+            )
+            s = summarize(p, r)
+            runs_p.append(s)
+            print(
+                f"  RMS to hover point {s['rms_hover_cm']:.2f} cm (max {s['max_hover_cm']:.2f}) | "
+                f"decisions {s['decisions']} (accepted {s['accepted']}, errors {s['errors']}) | "
+                f"LLM p50 {s['llm_latency_p50_s'] or 0:.2f} s | real-time factor {s['realtime_factor']:.2f}"
+            )
+            if rep == 0:
+                results[p] = r
+                Path("results").mkdir(exist_ok=True)
+                np.savez_compressed(
+                    f"results/traj_{p}_{run_path.stem}.npz",
+                    **{
+                        k: r[k]
+                        for k in (
+                            "t",
+                            "pos",
+                            "rpy",
+                            "wind",
+                            "wind_hat",
+                            "target",
+                            "err_hover",
+                            "gain",
+                            "tick_t",
+                        )
+                    },
+                    hover=r["hover"],
+                    decisions=json.dumps(r["decisions"]),
+                )
+            if r["decisions"]:
+                with open(
+                    f"results/decisions_{p}_{run_path.stem}_rep{rep}.jsonl", "w"
+                ) as fh:
+                    for d in r["decisions"]:
+                        fh.write(json.dumps(d) + "\n")
+        agg = dict(runs_p[0])
+        for key in ("rms_hover_cm", "max_hover_cm"):
+            vals = np.array([x[key] for x in runs_p])
+            agg[key + "_mean"], agg[key + "_std"] = float(vals.mean()), (
+                float(vals.std(ddof=1)) if len(vals) > 1 else 0.0
+            )
+        agg["repeats"] = runs_p
+        summ[p] = agg
+        if len(runs_p) > 1:
+            print(
+                f"  => {p}: RMS {agg['rms_hover_cm_mean']:.2f} ± {agg['rms_hover_cm_std']:.2f} cm, "
+                f"max {agg['max_hover_cm_mean']:.2f} ± {agg['max_hover_cm_std']:.2f} cm over {len(runs_p)} runs"
+            )
     Path("results").mkdir(exist_ok=True)
     Path(f"results/closed_loop_{run_path.stem}.json").write_text(
         json.dumps(summ, indent=2)
