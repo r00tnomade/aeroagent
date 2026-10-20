@@ -1,0 +1,14 @@
+AeroAgent
+Copyright 2026 Sami Adam Moughli
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+This product uses third-party software and services:
+
+- OpenAI Python SDK (Apache-2.0) - client for the OpenAI-compatible Nebius Token Factory API
+- jsonschema (MIT) - JSON schema validation
+
+Models accessed via API (weights are not redistributed):
+- NVIDIA Nemotron 3 Super / Nano: NVIDIA Nemotron Open Model License
+- NVIDIA Nemotron 3 Ultra: OpenMDW-1.1
+- NVIDIA Nemotron 3.5 Lightning: see the model card for license terms
