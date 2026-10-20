@@ -59,7 +59,9 @@ Create directories as needed, but keep this structure. Don't add top-level folde
 
 ## 4. Environment & commands
 
-- **Python 3.10** (pybullet has no prebuilt wheels beyond 3.10). Don't bump it.
+- **Python 3.12 in a conda env** (`conda activate aeroagent`). gym-pybullet-drones `main` requires
+  Python ≥ 3.12, and pybullet's pip source build fails on macOS — install it from conda-forge
+  (`conda install -c conda-forge pybullet`), never via pip.
 - Install: `pip install -e ".[dev]"`
 - Key deps: `nvidia-physicsnemo` (fallback `neuraloperator`), `torch`, `xlb` or `lettuce`,
   `gym-pybullet-drones`, `rerun-sdk`, `openai` (Token Factory is OpenAI-compatible), `fastapi`, `httpx`, `cmocean`.
