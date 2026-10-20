@@ -1,4 +1,4 @@
-# Copyright 2026 Sami Adam Moughli
+# Copyright 2026 <Your Name>
 # SPDX-License-Identifier: Apache-2.0
 """Train the sensor -> flow-field FNO on the LBM runs.
 
@@ -160,6 +160,12 @@ def main() -> None:
     ap.add_argument("--div-weight", type=float, default=0.1)
     ap.add_argument("--n-val", type=int, default=2)
     ap.add_argument(
+        "--val-runs",
+        nargs="*",
+        default=["run_019", "run_020", "run_039", "run_040"],
+        help="run names held out for validation (kept fixed so eval/ stays on unseen data)",
+    )
+    ap.add_argument(
         "--limit-runs",
         type=int,
         default=0,
@@ -174,7 +180,12 @@ def main() -> None:
     paths = sorted(Path(args.data).glob("run_*.npz"))
     if args.limit_runs:
         paths = paths[: args.limit_runs]
-    train_p, val_p = split_runs(paths, args.n_val)
+    val_names = set(args.val_runs or [])
+    if val_names and any(p.stem in val_names for p in paths):
+        val_p = [p for p in paths if p.stem in val_names]
+        train_p = [p for p in paths if p.stem not in val_names]
+    else:
+        train_p, val_p = split_runs(paths, args.n_val)
     print(f"device={dev}  train runs={len(train_p)}  val runs={len(val_p)}")
 
     t0 = time.perf_counter()
@@ -240,6 +251,8 @@ def main() -> None:
                     "downsample": args.downsample,
                     "norm": norm.to_dict(),
                     "grid": list(hw),
+                    "train_runs": [p.stem for p in train_p],
+                    "val_runs": [p.stem for p in val_p],
                 },
                 out / "fno.pt",
             )

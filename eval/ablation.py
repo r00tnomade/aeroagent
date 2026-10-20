@@ -57,7 +57,10 @@ def run_mode(
     duration: float,
     reflex_hz: float,
     estimator=None,
+    cd_scale: float = 1.0,
+    mean_wind=None,
 ) -> dict:
+    """cd_scale != 1 makes the controller's drag model wrong (robustness test); the simulator keeps the truth."""
     from gym_pybullet_drones.control.DSLPIDControl import DSLPIDControl
     from gym_pybullet_drones.utils.enums import DroneModel, Physics
 
@@ -93,12 +96,23 @@ def run_mode(
             if mode == "pid":
                 w_hat = None
                 dv = np.zeros(3)
+            elif (
+                mode == "mean_ff"
+            ):  # control: constant mean wind, as a good anemometer + low-pass would give
+                w_hat = np.asarray(mean_wind, float)
+                dv = feedforward_target_vel(
+                    drag_force(w_hat, vel, env.cd_a * cd_scale), d_coeff
+                )
             elif mode == "oracle_ff":
                 w_hat = w_true
-                dv = feedforward_target_vel(drag_force(w_true, vel, env.cd_a), d_coeff)
+                dv = feedforward_target_vel(
+                    drag_force(w_true, vel, env.cd_a * cd_scale), d_coeff
+                )
             else:
                 w_hat = estimator.estimate(pos, t).wind
-                dv = feedforward_target_vel(drag_force(w_hat, vel, env.cd_a), d_coeff)
+                dv = feedforward_target_vel(
+                    drag_force(w_hat, vel, env.cd_a * cd_scale), d_coeff
+                )
             log["tick_ms"].append((time.perf_counter() - t0) * 1e3)
             log["wind_true"].append(w_true)
             log["wind_hat"].append(w_hat if w_hat is not None else np.full(3, np.nan))

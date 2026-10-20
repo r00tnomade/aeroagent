@@ -1,4 +1,4 @@
-# Copyright 2026 Sami Adam Moughli
+# Copyright 2026 <Your Name>
 # SPDX-License-Identifier: Apache-2.0
 """Tier 1 reflex: sensors -> FNO flow field -> wind at the drone -> drag-force feedforward (50 Hz).
 
@@ -69,7 +69,13 @@ class FNOWindEstimator:
     """
 
     def __init__(
-        self, ckpt_path: str | Path, run_path: str | Path, device: str = "auto"
+        self,
+        ckpt_path: str | Path,
+        run_path: str | Path,
+        device: str = "auto",
+        sensor_noise: float = 0.0,
+        delay_frames: int = 0,
+        seed: int = 0,
     ):
         import torch
 
@@ -92,6 +98,9 @@ class FNOWindEstimator:
         self.xs, self.zs = raw["x"][::ds].astype(float), raw["z"][::ds].astype(float)
         self.n_frames = len(self.run.y)
         self._frame, self._uv = -1, None
+        # robustness knobs: extra sensor noise (fraction of the sensor std) and transport delay in frames
+        self.sensor_noise, self.delay_frames = float(sensor_noise), int(delay_frames)
+        self._rng = np.random.default_rng(seed)
         self.fno_ms_log: list[float] = []
         with torch.no_grad():  # warm-up
             x = torch.zeros(
@@ -110,10 +119,13 @@ class FNOWindEstimator:
             return self._uv, 0.0, True
         from model.data import make_input
 
-        k = max(frame, self.history - 1)
-        x = make_input(
-            self.run.p_sensors[k - self.history + 1 : k + 1], self.run, self.norm
-        )
+        k = max(frame - self.delay_frames, self.history - 1)
+        p_hist = self.run.p_sensors[k - self.history + 1 : k + 1]
+        if self.sensor_noise > 0:
+            p_hist = p_hist + self._rng.normal(
+                0, self.sensor_noise * self.norm.p_std, p_hist.shape
+            )
+        x = make_input(p_hist, self.run, self.norm)
         t0 = time.perf_counter()
         with self.torch.no_grad():
             y = self.model(self.torch.from_numpy(x[None]).to(self.dev))

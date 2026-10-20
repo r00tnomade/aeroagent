@@ -1,4 +1,4 @@
-# Copyright 2026 Sami Adam Moughli
+# Copyright 2026 <Your Name>
 # SPDX-License-Identifier: Apache-2.0
 """Render every documentation figure into docs/figures/.
 
@@ -342,7 +342,10 @@ def _load_model():
         if (CKPT / "metrics.json").exists()
         else {}
     )
-    _, val = split_runs(_runs(), args.get("n_val", 2))
+    if c.get("val_runs"):
+        val = [p for p in _runs() if p.stem in set(c["val_runs"])]
+    else:
+        _, val = split_runs(_runs(), args.get("n_val", 2))
     run = load_run(val[0], c["downsample"])
     return model, norm, run, val[0], c, dev
 
