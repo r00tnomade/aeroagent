@@ -1,210 +1,162 @@
+<div align="center">
+
 # AeroAgent
 
-**Sparse sensors → neural flow field in milliseconds → a Nemotron-supervised drone that rides the gust.**
+**A drone that sees the air.**
 
-![License](https://img.shields.io/badge/license-Apache--2.0-blue)
-![Python](https://img.shields.io/badge/python-3.12-blue)
-![LLM](https://img.shields.io/badge/LLM-NVIDIA_Nemotron_via_Nebius_Token_Factory-76B900)
-![Sim](https://img.shields.io/badge/sim-gym--pybullet--drones_%2B_Lattice--Boltzmann-orange)
-![Status](https://img.shields.io/badge/status-hackathon_build-lightgrey)
+Sparse pressure sensors → neural flow field in 6 ms → a Nemotron-supervised drone that rides the gust.
 
-![AeroAgent: ground-truth vorticity vs. FNO reconstruction from 32 pressure sensors](docs/figures/hero.gif)
+![License](https://img.shields.io/badge/license-Apache--2.0-lightgrey)
+![NVIDIA Nemotron](https://img.shields.io/badge/NVIDIA-Nemotron-76B900)
+![Nebius](https://img.shields.io/badge/Nebius-Token_Factory-2D2DFF)
 
-▶ **Demo video:** [`docs/media/aeroagent_demo.mp4`](docs/media/aeroagent_demo.mp4) · 3-min submission video: <!-- TODO: YouTube link -->
+<img src="docs/figures/hero.gif" width="720" alt="Ground-truth vorticity (top) vs. AeroAgent's reconstruction from 32 pressure sensors (bottom)">
 
-Built solo for the **Nebius × NVIDIA Global AI Hackathon, Physical AI track**.
+<sub>Top: simulated airflow. Bottom: what AeroAgent reconstructs from 32 pressure sensors alone.</sub>
+
+[Demo video](docs/media/aeroagent_demo.mp4) · [Results](#results) · [How it works](#how-it-works) · [Quickstart](#quickstart)
+
+</div>
 
 ---
 
-## The problem
+## Why
 
-Small drones increasingly fly where the air is worst: next to buildings, bridges, wind turbines and ships. Gusts and wake vortices push them off course, and a drone usually notices only *after* its IMU registers the push. A CFD solve could tell it what is coming, but takes minutes. A drone has milliseconds.
+Gusts and wake vortices near buildings, bridges and ships push small drones off course. A CFD simulation could warn them, but it takes minutes. A drone has milliseconds.
 
-## The idea
+## How it works
 
-Give the drone a real-time picture of the air around it, and split the work by speed:
+Three layers, each running only as fast as it can be trusted.
 
-| Tier | Rate | What runs | Job |
+| | Rate | What | Role |
 |---|---|---|---|
-| **0 · Attitude** | 240 Hz | PID + motor mixer (`DSLPIDControl`) | keep the vehicle upright |
-| **1 · Reflex** | 48 Hz | 32 pressure sensors → **Fourier Neural Operator** → wind at the drone → drag feedforward | lean into the gust *before* it pushes |
-| **2 · Judgment** | ~2 Hz, async | **NVIDIA Nemotron** on **Nebius Token Factory** → validated JSON intent | decide *how* to fly it, and say why |
+| **Reflex** | 50 Hz | Fourier Neural Operator → wind at the drone → feedforward | lean into the gust before it hits |
+| **Control** | 240 Hz | PID | keep the drone stable |
+| **Judgment** | 2 Hz | NVIDIA Nemotron on Nebius Token Factory | decide how to fly it, and explain why |
 
-The language model never touches the motors and never sits in a fast loop. It proposes a bounded intent (mode, gain scale, tilt limit, set-point offset); a deterministic validator clamps, rate-limits and, if the model is late or wrong, falls back to a safe hold.
+The language model never touches the motors. Every decision passes a deterministic validator; if the model is late or wrong, the drone simply holds.
 
 ```mermaid
 flowchart LR
-  S["32 pressure taps<br/>(obstacle surface)"] --> F["FNO flow field<br/>~6 ms"]
-  F --> R["Tier 1 reflex 48 Hz<br/>drag feedforward"]
-  R --> P["Tier 0 PID 240 Hz"] --> D["Drone"]
-  F --> X["Feature builder<br/>~30 numbers"]
-  X --> W["Worker process"] --> N["Nemotron 3.5 Lightning<br/>Nebius Token Factory"]
-  N --> V["Validator<br/>clamp · rate-limit · SAFE latch"]
-  G["Rule guardrail 10 Hz"] --> V
-  V --> R
+  S[32 sensors] --> F[FNO · 6 ms] --> R[Reflex · 50 Hz] --> D[Drone]
+  F --> N[Nemotron · 2 Hz] --> V[Validator] --> R
 ```
-
-## Sponsor technology used
-
-| Component | Where | Status | Why |
-|---|---|---|---|
-| **NVIDIA Nemotron 3.5 Lightning** via **Nebius Token Factory** | [`agent/supervisor.py`](agent/supervisor.py) | ✅ running in the closed loop | Tier 2 supervisor, strict JSON schema, reasoning off, p50 0.56–0.70 s |
-| **NVIDIA Nemotron 3 Super** via Token Factory | `agent/supervisor.py` (`--model`) | ✅ benchmarked, fallback | same role; latency varied 1.1 s → 11 s over the day (see below) |
-| **NVIDIA Nemotron 3 Ultra** via Token Factory | `tools/tf_check.py` | ✅ benchmarked (reasoning on, 3/3 valid, ~5.7 s) | pre-flight mission planning <!-- TODO: wire into mission briefing --> |
-| **Nebius Serverless Endpoint** | `serve/` | 🚧 Thursday | host the FNO next to the Token Factory region |
-| **Nebius Serverless Jobs** | `jobs/` | 🚧 Thursday | Lattice-Boltzmann data generation + FNO training |
-
-The FNO is implemented in plain PyTorch ([`model/fno.py`](model/fno.py)); NVIDIA PhysicsNeMo's FNO is wired in as a drop-in (`--arch physicsnemo`) but not yet benchmarked.
-
----
 
 ## Results
 
-All numbers are measured, in simulation, on LBM runs the model never saw during training. Hardware: Apple M1 Max (MPS). Every figure is regenerated by `python -m viz.make_figures`.
+<sub>Simulation, on runs the model never saw. Apple M1 Max.</sub>
 
-### 1 · The FNO sees the air
+<table>
+<tr>
+<td width="50%"><img src="docs/figures/reconstruction.png" alt="Flow-field reconstruction"></td>
+<td width="50%"><img src="docs/figures/ablation_tracking_run_020_x1p2_checkpoints_v2.png" alt="Tracking error"></td>
+</tr>
+<tr>
+<td align="center"><sub>Full flow field from 32 sensors, in 6 ms</sub></td>
+<td align="center"><sub>Hover error: PID only vs. AeroAgent</sub></td>
+</tr>
+</table>
 
-![Ground truth vs. FNO reconstruction](docs/figures/reconstruction.png)
-
-| Metric (4 held-out runs) | Value |
+| | |
 |---|---|
-| relative L2 error u / v / p | 0.067 / 0.343 / 0.201 |
-| model size | 6.3 M parameters, 64 × 128 grid |
-| inference, batch 1 | p50 5.9 ms · p95 7.3 ms (M1 Max) |
-| training data | 37 self-generated runs, 10,841 samples |
+| **−82 %** | hover error vs. PID alone (−77 to −87 % across 4 unseen runs) |
+| **6 ms** | flow-field reconstruction (6.3 M-parameter FNO) |
+| **0.6 s** | Nemotron decision latency, 37 / 37 valid |
+| **0 %** | performance lost when the language model fails completely |
 
-`u` contains the mean inflow and is easy; `v` is almost pure vortex motion and is the honest number. Error rises during gusts (see `docs/figures/error_over_time.png`).
+<details>
+<summary><b>Full results</b></summary>
 
-### 2 · The reflex works: −77 % to −87 % hover error
+<br>
 
-Hover 1.2 m behind the obstacle, in the wake. Same seed, same ground-truth wind for every controller.
+**Reflex (Tier 1), 4 held-out runs**
 
-![Tracking error: PID vs. FNO feedforward vs. true wind](docs/figures/ablation_tracking_run_020_x1p2_checkpoints_v2.png)
-
-| Held-out run | PID only (RMS / gust) | **AeroAgent (RMS / gust)** | Reduction | Perfect wind knowledge |
+| Run | PID only | AeroAgent | Reduction | Perfect wind knowledge |
 |---|---|---|---|---|
-| run_019 | 3.2 / 3.3 cm | **0.4 / 0.3 cm** | **−87 %** | −91 % |
-| run_020 | 3.1 / 4.3 cm | **0.7 / 0.7 cm** | **−79 %** | −84 % |
-| run_039 | 3.3 / 3.8 cm | **0.8 / 0.4 cm** | **−77 %** | −87 % |
-| run_040 | 3.5 / 3.7 cm | **0.5 / 0.3 cm** | **−86 %** | −90 % |
-| **mean** | 3.3 cm | **0.6 cm** | **−82 %** | −88 % |
+| 019 | 3.2 cm | 0.4 cm | −87 % | −91 % |
+| 020 | 3.1 cm | 0.7 cm | −79 % | −84 % |
+| 039 | 3.3 cm | 0.8 cm | −77 % | −87 % |
+| 040 | 3.5 cm | 0.5 cm | −86 % | −90 % |
 
-Wind estimate at the drone: 0.30–0.41 m/s RMS error against 1.2–1.4 m/s RMS wind fluctuation.
+A feedforward with the exact mean wind alone (no FNO) already removes 60–76 %. The FNO's value is in the gust, where it cuts the remaining error by another 57–79 %.
 
-![Wind at the drone: FNO estimate vs. truth](docs/figures/wind_at_drone_run_020_x1p2_checkpoints_v2.png)
+**Robustness (run 020)**
 
-**Honest control experiment.** A feedforward with the *exact* time-averaged wind (an idealised anemometer, no FNO) already removes 60–76 % of the error. The FNO's added value is in the gust: during the gust it cuts the remaining error by a further 57–79 % (run_019: 1.06 → 0.46 cm, run_020: 1.89 → 0.39 cm, model v1).
-
-### 3 · Robust to the things that will be wrong in reality
-
-![Robustness sweep](docs/figures/robustness_checkpoints_v2.png)
-
-| Perturbation (run_020) | Error reduction vs. PID |
+| Perturbation | Reduction vs. PID |
 |---|---|
 | nominal | −79 % |
-| drag model wrong by ±30 % | −65 % / −62 % |
-| drag model wrong by ±50 % | −47 % / −45 % |
-| sensor noise 5 / 10 / 20 % | −79 / −80 / −80 % |
-| sensor → estimate delay 25 / 50 / 100 ms | −78 / −76 / −73 % |
-| other held-out run (run_019) | −87 % |
+| drag model ±30 % wrong | −65 / −62 % |
+| sensor noise 20 % | −80 % |
+| 100 ms delay | −73 % |
 
-### 4 · Each component sits in the loop it is fast enough for
+**Closed loop with Nemotron (real time, 3 repeats)**
 
-![Latency tiers](docs/figures/latency_tiers.png)
-
-| Nemotron model (Token Factory, strict JSON schema) | p50 | p95 | valid | role |
-|---|---|---|---|---|
-| Nemotron 3.5 Lightning (eu-north1) | 0.63 s* | 0.81 s* | 25/25 | **supervisor** |
-| Nemotron 3 Super (us-central1) | 1.13 s (17:20) · 11.2 s (22:38) | 1.63 s · 16.5 s | 25/25 | fallback |
-| Nemotron 3 Nano | 1.32 s | 3.07 s | 25/25 | not used |
-| Nemotron 3 Ultra, reasoning on | 5.72 s | 5.93 s | 3/3 | mission planning |
-
-\* measured at 22:38; at 17:20 Lightning measured p50 1.19 s. Same model, same prompt, latency varied ~10× over one day, which is exactly why the LLM must never be in the fast loop.
-
-### 5 · Nemotron in the real-time closed loop
-
-The simulation is paced to wall-clock time, so the measured LLM latency has its real effect. Supervisor at 2 Hz, run_020, 3 repeats for the supervised policies (LLM timing varies run to run; Tiers 0–1 are deterministic).
-
-![Closed loop](docs/figures/closed_loop_run_020.png)
-
-| Configuration | RMS to hover point | max |
+| | RMS | max |
 |---|---|---|
 | PID only | 3.10 cm | 5.65 cm |
-| + FNO feedforward (Tier 1) | 0.66 cm | 1.72 cm |
-| + rule supervisor | 0.54 ± 0.00 cm | 1.26 ± 0.00 cm |
+| + FNO reflex | 0.66 cm | 1.72 cm |
+| + rule supervisor | 0.54 cm | 1.26 cm |
 | + Nemotron 3.5 Lightning | 0.60 ± 0.03 cm | 1.57 ± 0.16 cm |
 | + Nemotron with rule guardrail | <!-- TODO --> | <!-- TODO --> |
 
-37/37 Nemotron decisions valid, p50 0.60 s, zero errors. Example rationales, verbatim:
+> *"Gust at drone (0.25) still present for 0.28 s; keep stiff gains."* — Nemotron, live
 
-> *"Gust front arrives in 0.58 s; stiffen gains and cap tilt."*
-> *"Gust at drone (0.25) still present for 0.28 s; keep stiff gains."*
-> *"Calm inflow, vortices within normal range, point tracked within 6 mm."*
+A zero-latency rule still edges out the LLM on this narrow task, so the rules stay as an instant guardrail and Nemotron adds judgment on top.
 
-**Fail-safe, demonstrated.** In a run where every Nemotron call timed out (provider overload), the validator latched SAFE after three failures and the drone flew **exactly** as well as without a supervisor (0.66 cm).
+**FNO accuracy:** relative L2 error u 0.067 · v 0.343 · p 0.201 on 4 held-out runs.
 
-**Honest result.** On this narrow, fully specified task, a zero-latency hand-written rule still beats the LLM by ~0.06 cm, because Nemotron's answer arrives ~0.6 s after the rule would have acted. AeroAgent therefore keeps the rules as an instant guardrail and uses Nemotron for judgment, explanation and mission-level decisions on top.
+</details>
 
----
+<p align="center"><img src="docs/figures/latency_tiers.png" width="720" alt="Latency of each component vs. its loop period"></p>
+<p align="center"><sub>Each component sits in the loop it is fast enough for.</sub></p>
 
-## What I learned building it
+## Built with
 
-1. **Few-shot examples define "normal".** One example showed a vortex of strength 28 → RETREAT. In this wake 28 is the everyday value. Nemotron retreated, the set-point moved, tracking error grew, and that "confirmed" the next retreat: a feedback loop built by the prompt. Fixed with calibrated feature descriptions and a hover-error metric separate from set-point error.
-2. **Give the model the quantity that matters.** The gust upstream and the gust *at the drone* are ~1 s apart. Adding `gust_at_drone` / `gust_remaining_s` stopped Nemotron from relaxing too early.
-3. **Measure latency when it matters, not once.** Same model, 1.1 s at 17:20, 11 s at 22:38.
-4. **Network I/O belongs in its own process.** Running the LLM client in a thread next to the physics loop made both slower; a separate worker process fixed it.
-
----
+| | |
+|---|---|
+| **NVIDIA Nemotron 3.5 Lightning** | real-time supervisor, strict JSON schema |
+| **NVIDIA Nemotron 3 Super · Ultra** | fallback supervisor · mission planning |
+| **Nebius Token Factory** | serves every Nemotron call |
+| **Nebius Serverless** | FNO endpoint and training jobs <!-- TODO: status --> |
+| **PyTorch · gym-pybullet-drones** | model and flight simulation |
 
 ## Quickstart
 
 ```bash
-# environment (macOS / Linux): pybullet and pytorch from conda-forge share one OpenMP runtime
 conda create -n aeroagent python=3.12 -y && conda activate aeroagent
 conda install -c conda-forge pybullet pytorch ffmpeg -y
-git clone https://github.com/utiasDSL/gym-pybullet-drones.git && pip install -e gym-pybullet-drones --no-deps
 pip install -r requirements.txt
 ```
 
 ```bash
-python -m jobs.generate_lbm --runs 41 --preview         # synthetic CFD data (~1 min per run on M1 Max)
-python -m model.train --epochs 30                        # FNO, fixed held-out runs 019/020/039/040
-python -m eval.ablation                                  # Tier 1: PID vs FNO feedforward vs true wind
-python -m eval.robustness                                # robustness sweep + mean-wind control
-echo "NEBIUS_API_KEY=..." > .env
-python -m eval.closed_loop --period 0.5 --repeats 3      # full real-time loop with Nemotron
-python -m viz.make_figures && python -m viz.make_video   # all figures + demo video
+python -m jobs.generate_lbm --runs 41     # synthetic airflow data
+python -m model.train                     # train the FNO
+python -m eval.ablation                   # reflex vs. PID
+python -m eval.closed_loop --period 0.5   # full loop with Nemotron (needs NEBIUS_API_KEY in .env)
 ```
 
-## Repository layout
+<details>
+<summary><b>Project layout</b></summary>
 
 ```
-agent/    Nemotron supervisor, prompt + JSON schema, feature builder, validator
-control/  Tier 1 reflex: FNO wind estimator, drag feedforward
-model/    FNO (plain PyTorch, PhysicsNeMo drop-in), dataset, training
-sim/      gym-pybullet-drones wind subclass, numpy D2Q9 Lattice-Boltzmann solver
-jobs/     data generation (later: Nebius Serverless Jobs)
-eval/     ablation, robustness, real-time closed loop
-viz/      figures and demo video
-tools/    Token Factory benchmark / diagnosis (tf_check.py)
-tests/    validator unit tests
+agent/    Nemotron supervisor, prompt, validator
+control/  reflex: FNO wind estimate + feedforward
+model/    Fourier Neural Operator, training
+sim/      drone simulation, Lattice-Boltzmann solver
+eval/     ablation, robustness, closed loop
+viz/      figures and video
 ```
 
-## Model card (FNO)
+</details>
 
-- **Task:** reconstruct 2D velocity and pressure fields (u, v, p) from the last 8 frames of 32 surface pressure taps, encoded by nearest-sensor (Voronoi) tessellation plus obstacle mask, signed distance and coordinates.
-- **Data:** self-generated D2Q9 Lattice-Boltzmann, flow past a cylinder, Re 100–220, randomised gust pulses at the inlet. Domain 4 m × 2 m, 256 × 128 cells (trained at 64 × 128).
-- **Training:** relative L2 + divergence penalty, 30 epochs, AdamW + one-cycle, 2 % sensor noise and 5 % sensor dropout as augmentation.
-- **Out of scope:** real air at drone scale (the lattice Reynolds number is far lower), 3D flow, other geometries, any real flight. **Not flight-certified.**
+## Limitations
 
-## Limitations & next steps
+Simulation only, 2D, one obstacle shape. Sensors sit on the obstacle, not the drone. Not flight-certified.
 
-- Simulation only, 2D slice, one obstacle shape; the controller's drag model matches the simulator's (see robustness for ±50 % mismatch).
-- Sensors sit on the obstacle (think: instrumented building or ship superstructure), not on the drone.
-- Next: FNO on a Nebius Serverless Endpoint, Ultra mission briefing with a live wind forecast, 3D LBM + 3D FNO, Isaac Lab, and a Crazyflie in front of a fan with the FNO on a Jetson Orin Nano.
+**Next:** FNO on Nebius Serverless, 3D flow, a real Crazyflie in front of a fan.
 
-## License & notices
+---
 
-Code: **Apache-2.0** (see [`LICENSE`](LICENSE), third-party notices in [`NOTICE`](NOTICE)). Self-generated dataset: CC-BY-4.0.
-Models are used via API only; weights are not redistributed. Nemotron 3 Super / Nano: NVIDIA Nemotron Open Model License. Nemotron 3 Ultra: OpenMDW-1.1. Nemotron 3.5 Lightning: see its model card.
-Dependencies: gym-pybullet-drones (MIT), PyBullet (zlib), PyTorch (BSD-3), OpenAI Python SDK (Apache-2.0), matplotlib, numpy.
+<div align="center">
+<sub>Apache-2.0 · Built solo for the Nebius × NVIDIA Global AI Hackathon, Physical AI track</sub>
+</div>
