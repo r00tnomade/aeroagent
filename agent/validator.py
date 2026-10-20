@@ -1,4 +1,4 @@
-# Copyright 2026 <Your Name>
+# Copyright 2026 Sami Adam Moughli
 # SPDX-License-Identifier: Apache-2.0
 """Deterministic safety layer between Nemotron and the flight controller (AGENTS.md, section 7).
 

@@ -1,4 +1,4 @@
-# Copyright 2026 <Your Name>
+# Copyright 2026 Sami Adam Moughli
 # SPDX-License-Identifier: Apache-2.0
 """Minimal 2D Lattice-Boltzmann solver (D2Q9, BGK) for gusty flow past a cylinder.
 

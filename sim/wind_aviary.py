@@ -1,4 +1,4 @@
-# Copyright 2026 <Your Name>
+# Copyright 2026 Sami Adam Moughli
 # SPDX-License-Identifier: Apache-2.0
 """Wind injection for gym-pybullet-drones (Tier 0 simulator).
 
