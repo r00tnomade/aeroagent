@@ -98,6 +98,9 @@ class FNOWindEstimator:
         self.xs, self.zs = raw["x"][::ds].astype(float), raw["z"][::ds].astype(float)
         self.n_frames = len(self.run.y)
         self._frame, self._uv = -1, None
+        self.last_field: np.ndarray | None = None
+        self.last_p_sensors: np.ndarray | None = None
+        self.sensor_ij_ds = (self.run_sensor_ij(raw) // ds).astype(int)
         # robustness knobs: extra sensor noise (fraction of the sensor std) and transport delay in frames
         self.sensor_noise, self.delay_frames = float(sensor_noise), int(delay_frames)
         self._rng = np.random.default_rng(seed)
@@ -109,6 +112,10 @@ class FNOWindEstimator:
             for _ in range(10):
                 self.model(x)
             sync(self.dev)
+
+    @staticmethod
+    def run_sensor_ij(raw) -> np.ndarray:
+        return np.asarray(raw["sensor_ij"])
 
     def frame_at(self, t: float) -> int:
         return int(t / self.run.dt) % self.n_frames
@@ -133,8 +140,11 @@ class FNOWindEstimator:
             y = y[0].cpu().numpy()
         ms = (time.perf_counter() - t0) * 1e3
         self.fno_ms_log.append(ms)
-        uv = y[:2] * self.norm.y_std[:2, None, None] + self.norm.y_mean[:2, None, None]
+        full = y * self.norm.y_std[:, None, None] + self.norm.y_mean[:, None, None]
+        uv = full[:2]
         self._frame, self._uv = frame, uv
+        # kept for the Tier 2 feature builder: full (u, v, p) field and the sensor readings it was built from
+        self.last_field, self.last_p_sensors = full, p_hist[-1]
         return uv, ms, False
 
     def estimate(self, pos: np.ndarray, t: float) -> WindEstimate:

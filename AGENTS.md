@@ -79,7 +79,7 @@ Never hard-code, log, or commit them. `.env` is git-ignored.
 
 **Token Factory (Nemotron)**
 - Base URL: `https://api.tokenfactory.nebius.com/v1/` via the `openai` SDK.
-- Periodic supervisor: Nemotron 3 Super (fallback: Nemotron 3.5 Lightning, then rule-based baseline).
+- Periodic supervisor: Nemotron 3.5 Lightning (fallback: Nemotron 3 Super, then rule-based baseline).
   Event-driven planning (pre-flight mission, gust-front deliberation): Nemotron 3 Ultra with reasoning on, never blocking.
 - Model IDs live in `agent/config.py` only. Confirmed via `GET /v1/models` (20 Oct 2026) — casing is
   inconsistent, copy exactly:
@@ -90,8 +90,10 @@ Never hard-code, log, or commit them. `.env` is git-ignored.
 
   | Model | p50 | p95 | Schema valid | Role |
   |---|---|---|---|---|
-  | `nvidia/nemotron-3-super-120b-a12b` | 1.13 s | 1.63 s | 25/25 | **Primary supervisor, ~1 Hz** |
-  | `nvidia/Nemotron-3_5-Lightning` | 1.19 s | 1.54 s | 25/25 | Fallback supervisor |
+  | `nvidia/nemotron-3-super-120b-a12b` | 1.13 s | 1.63 s | 25/25 | Fallback supervisor (us-central1) |
+  | `nvidia/Nemotron-3_5-Lightning` | 1.19 s | 1.54 s | 25/25 | **Primary supervisor (eu-north1)** |
+- Re-measured 22:38 the same day: Super p50 **11.2 s** (p95 16.5 s), Lightning p50 **0.63 s** (p95 0.81 s).
+  Provider latency varies ~10x over the day -> the supervisor defaults to Lightning, same region as the FNO endpoint.
   | `nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B` | 1.32 s | 3.07 s | 25/25 | Not used (p95 too high) |
   | `nvidia/Nemotron-3-Ultra-550b-a55b` (reasoning on, 3 calls) | 5.72 s | 5.93 s | 3/3 | Pre-flight mission planning only |
 - With reasoning on, Ultra writes its reasoning as plain text into `content` (no separate field, no `<think>`)
