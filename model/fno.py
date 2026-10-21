@@ -1,4 +1,4 @@
-# Copyright 2026 <Your Name>
+# Copyright 2026 Sami Adam Moughli
 # SPDX-License-Identifier: Apache-2.0
 """Compact 2D Fourier Neural Operator (Li et al. 2021) in plain PyTorch.
 

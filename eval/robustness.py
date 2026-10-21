@@ -1,4 +1,4 @@
-# Copyright 2026 <Your Name>
+# Copyright 2026 Sami Adam Moughli
 # SPDX-License-Identifier: Apache-2.0
 """How fragile is the -80 %? Perturb one thing at a time and re-run the FNO-feedforward hover.
 

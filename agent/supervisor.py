@@ -1,4 +1,4 @@
-# Copyright 2026 <Your Name>
+# Copyright 2026 Sami Adam Moughli
 # SPDX-License-Identifier: Apache-2.0
 """Tier 2: asynchronous supervisor. Exactly one request in flight; the control loop never waits for it.
 

@@ -1,4 +1,4 @@
-# Copyright 2026 <Your Name>
+# Copyright 2026 Sami Adam Moughli
 # SPDX-License-Identifier: Apache-2.0
 """Full AeroAgent loop in REAL TIME: Tier 0 PID (240 Hz) + Tier 1 FNO feedforward (48 Hz)
 + Tier 2 supervisor (~1 Hz, asynchronous, through the validator).

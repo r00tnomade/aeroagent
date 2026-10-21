@@ -1,4 +1,4 @@
-# Copyright 2026 <Your Name>
+# Copyright 2026 Sami Adam Moughli
 # SPDX-License-Identifier: Apache-2.0
 """Nemotron supervisor prompt and output schema. Keep SYSTEM_PROMPT byte-identical between calls
 (prefix caching); the per-call feature JSON is sent as the user message."""

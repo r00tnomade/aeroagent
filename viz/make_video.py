@@ -1,4 +1,4 @@
-# Copyright 2026 <Your Name>
+# Copyright 2026 Sami Adam Moughli
 # SPDX-License-Identifier: Apache-2.0
 """Render the AeroAgent demo video (1920x1080 MP4) from a real closed-loop run.
 
