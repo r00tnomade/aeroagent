@@ -63,8 +63,8 @@ flowchart LR
 
 - **−82 %** hover error vs. PID alone (−77 % to −87 % across 4 unseen runs)
 - **6 ms** to reconstruct the flow field (6.3 M-parameter FNO)
-- **0.6 s** per Nemotron decision, 37 of 37 valid
-- **No loss** in flight performance when the language model fails completely
+- **0.6–0.9 s** per Nemotron decision, 88 of 88 valid across 9 closed-loop runs
+- **No loss** in flight performance when the language model is slow or fails completely
 
 <details>
 <summary><b>Full results</b></summary>
@@ -99,16 +99,18 @@ Compensating only the exact mean wind (no FNO) already removes 60–76 %. The FN
 **Closed loop with Nemotron, real time, 3 repeats**
 
 | Configuration | RMS error | max error |
-|---|---|:---|
+|---|---|---|
 | PID only | 3.10 cm | 5.65 cm |
 | + FNO reflex | 0.66 cm | 1.72 cm |
 | + rule supervisor | 0.54 cm | 1.26 cm |
-| + Nemotron 3.5 Lightning | 0.60 ± 0.03 cm | 1.57 ± 0.16 cm |
-| + Nemotron with rule guardrail | <!-- TODO --> | <!-- TODO --> |
+| + Nemotron 3.5 Lightning | 0.61 ± 0.02 cm | 1.64 ± 0.13 cm |
+| **+ Nemotron with rule guardrail** | **0.55 ± 0.00 cm** | **1.29 ± 0.00 cm** |
 
-> *"Gust at drone (0.25) still present for 0.28 s; keep stiff gains."* (Nemotron, live)
+<sub>Nemotron: 6 runs over two sessions (latency p50 0.56–0.93 s). Guardrail: 3 runs.</sub>
 
-On this narrow task a zero-latency rule still edges out the LLM, so the rules stay as an instant guardrail and Nemotron adds judgment and explanations on top.
+> *"Gust at drone (0.26) still present for 0.65 s; maintain stiff gains."* (Nemotron, live)
+
+On its own, Nemotron's answer arrives 0.6–1 s after a zero-latency rule would have acted, so it trails the rules slightly and gets worse when the API is slow. With the rules as an instant guardrail underneath, the result no longer depends on LLM latency: in one run Nemotron answered in 1.6 s and missed the gust entirely, and the drone still held 0.55 cm.
 
 <img src="docs/figures/closed_loop_run_020.png" alt="Closed loop with Nemotron decisions">
 
@@ -204,7 +206,7 @@ Simulation only, 2D airflow, one obstacle shape. The sensors sit on the obstacle
 ```bibtex
 @software{aeroagent2026,
   title  = {AeroAgent: neural flow-field feedforward with an LLM supervisor for drones in gusty wakes},
-  author = {Sami Adam Moughli},
+  author = {<Your Name>},
   year   = {2026},
   url    = {https://github.com/r00tnomade/aeroagent}
 }
@@ -213,5 +215,5 @@ Simulation only, 2D airflow, one obstacle shape. The sensors sit on the obstacle
 ---
 
 <div align="center">
-<sub>Apache-2.0 · Built solo for the Nebius × NVIDIA Global AI Hackathon</sub>
+<sub>Apache-2.0 · Built solo for the Nebius × NVIDIA Global AI Hackathon, Physical AI track</sub>
 </div>
