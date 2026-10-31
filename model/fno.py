@@ -94,13 +94,17 @@ def build_model(arch: str, in_channels: int, out_channels: int = 3, **kw) -> nn.
     if arch == "physicsnemo":
         from physicsnemo.models.fno import FNO  # pip install nvidia-physicsnemo
 
+        # matched to our FNO2d for a fair comparison: same width, layers, (16, 24) modes, padding, 128-wide decoder
         return FNO(
             in_channels=in_channels,
             out_channels=out_channels,
             dimension=2,
             latent_channels=kw.get("width", 32),
             num_fno_layers=kw.get("n_layers", 4),
-            num_fno_modes=kw.get("modes1", 16),
+            num_fno_modes=[kw.get("modes1", 16), kw.get("modes2", 24)],
             padding=kw.get("padding", 8),
+            decoder_layers=1,
+            decoder_layer_size=128,
+            coord_features=True,
         )
     raise ValueError(f"unknown arch {arch!r}")
